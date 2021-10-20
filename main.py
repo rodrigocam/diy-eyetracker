@@ -1,83 +1,50 @@
-import pygame
-from scipy.optimize import least_squares
+import cv2
+import picamera
+import io
+import numpy as np
 
-SCREEN_SIZE = (1280, 1024)
-BLACK = (0, 0, 0)
-POR_INTERVAL = 3000
-pygame.init()
+from pupil_detectors import Detector2D
 
-screen = pygame.display.set_mode(SCREEN_SIZE)
-clock = pygame.time.Clock()
+detector = Detector2D()
 
-running = True
+eye_cam = picamera.PiCamera()
+eye_cam.rotation = -90
 
-def linear_model(x, points):
-    return [x[0] * p[0] + x[1] * p[1] + x[2] for p in points]
+scene_cam = cv2.VideoCapture(0)
+
+def get_eye_img():
+    stream = io.BytesIO()
+    eye_cam.capture(stream, resize=(320, 240), format="jpeg")
+    data = np.fromstring(stream.getvalue(), dtype=np.uint8)
+    frame = cv2.imdecode(data, 1)
+    frame = cv2.equalizeHist(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+    return frame
+
+def _params():
+    with open("calibration.txt", "r") as f:
+        lines = f.readlines()
+        paramsx = list(map(lambda x: float(x), lines[:3]))
+        paramsy = list(map(lambda y: float(y), lines[3:]))
+        return (paramsx, paramsy)
 
 
-class Calibration:
+params_x, params_y = _params()
 
-    def __init__(self, scene_size):
-        self.started = False
-        self.start_time = None
-        self.w, self.h = scene_size
-        self.visible_point = None
-        self.por = iter(self._por)
-        self.xes = dict(zip(self._por, [None] * len(self._por))) 
+model_x = lambda x, y: params_x[0] * x + params_x[1] * y + params_x[2]
+model_y = lambda x, y: params_y[0] * x + params_y[1] * y + params_y[2]
 
-    def start(self):
-        if not self.started:    
-            self.started = True
-            self.start_time = pygame.time.get_ticks()
-            self.visible_point = next(self.por)
+while True:
+    _, scene = scene_cam.read()
+    scene = cv2.resize(scene, (1280, 1024))
+    
+    eye = get_eye_img()
+    result = detector.detect(eye)
+    center = result["ellipse"]["center"]
 
-    def update(self, eye_img):
-        if self.started:
-            if pygame.time.get_ticks() - self.start_time >= POR_INTERVAL:
-                self.visible_point = next(self.por)
-                self.start_time = pygame.time.get_ticks()
-                
-            if self.visible_point is not None:
-                pygame.draw.circle(screen, (255, 0, 0), self.visible_point, 35)
-                xe = detector.detect(eye_img)["ellipse"]
-                self.xes[self.visible_point] = xe["center"]
+    Sx = model_x(*center)
+    Sy = model_y(*center)
 
-    def write(self, out):
-        x0 = [1.0, 1.2, 3.0]
-        res = least_squares(linear_model, x0, self.xes.values())
-        with open(out, "w") as file:
-            file.write(res.x)
+    cv2.circle(scene, (int(Sx), int(Sy)), 35, (255, 0, 0), 2)
 
-    @property
-    def _por(self): 
-        # points of regard
-        return [
-                (self.w * 0.05, self.h * 0.05), (self.w * 0.5, self.h * 0.05), (self.w * 0.95, self.h * 0.05),
-                (self.w * 0.25, self.h * 0.25), (self.w * 0.75, self.h * 0.25),
-                (self.w * 0.05, self.h * 0.5), (self.w * 0.5, self.h * 0.5), (self.w * 0.95, self.h * 0.5),
-                (self.w * 0.25, self.h * 0.75), (self.w * 0.75, self.h * 0.75),
-                (self.w * 0.05, self.h * 0.95), (self.w * 0.5, self.h * 0.95), (self.w * 0.95, self.h * 0.95),
-                ]
-
-calibration = Calibration(SCREEN_SIZE)
-
-while running:
-    for event in pygame.event.get():
-        if event.type == pygame.QUIT:
-            running = False
-            break
-        if event.type == pygame.KEYDOWN and event.key == ord("s"):
-            calibration.start()
-
-    screen.fill(BLACK)
-    try:
-        eye_img = cv2.
-        calibration.update(eye_img)
-    except StopIteration:
-        calibration.write("calibration.txt")
-        running = False
-
-    pygame.display.flip()
-    clock.tick(24)
-
-pygame.quit()
+    cv2.imshow("Image", scene)
+    cv2.waitKey(1)
