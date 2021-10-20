@@ -23,19 +23,20 @@ def get_eye_img():
 def _params():
     with open("calibration.txt", "r") as f:
         lines = f.readlines()
-        paramsx = list(map(lambda x: float(x), lines[:3]))
-        paramsy = list(map(lambda y: float(y), lines[3:]))
+        paramsx = list(map(lambda x: float(x), lines[:5]))
+        paramsy = list(map(lambda y: float(y), lines[5:]))
         return (paramsx, paramsy)
 
 
 params_x, params_y = _params()
 
-model_x = lambda x, y: params_x[0] * x + params_x[1] * y + params_x[2]
-model_y = lambda x, y: params_y[0] * x + params_y[1] * y + params_y[2]
+model_x = lambda x, y: params_x[0] * x**2 + params_x[1] * y**2 + params_x[2] * x + params_x[3] * y + params_x[4]
+model_y = lambda x, y: params_y[0] * x**2 + params_y[1] * y**2 + params_y[2] * x + params_y[3] * y + params_y[4]
+#model_y = lambda x, y: params_y[0] * x + params_y[1] * y + params_y[2]
 
 while True:
     _, scene = scene_cam.read()
-    scene = cv2.resize(scene, (1280, 1024))
+    scene = cv2.resize(scene, (800, 600))
     
     eye = get_eye_img()
     result = detector.detect(eye)
